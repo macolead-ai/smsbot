@@ -3,6 +3,7 @@ import os
 import io
 import asyncio
 import zipfile
+from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
     Application,
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
 # Limits
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB (Telegram bot upload limit)
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 MAX_MERGE_FILES = 10
 
 # Modes
@@ -416,6 +417,23 @@ async def do_split(update: Update, context: ContextTypes.DEFAULT_TYPE, ranges=No
         reset_user_state(context)
 
 
+# ---------- Dummy web server (keeps Render Web Service alive) ----------
+
+async def health(request):
+    return web.Response(text="Bot is running")
+
+
+async def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app = web.Application()
+    app.router.add_get("/", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health server listening on port {port}")
+
+
 # ---------- Runner ----------
 
 async def run_bot():
@@ -432,6 +450,9 @@ async def run_bot():
         application.add_handler(CallbackQueryHandler(menu_callback))
         application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_range))
+
+        # Start dummy web server so Render keeps the service alive
+        await run_web()
 
         logger.info("Bot is now polling...")
         await application.initialize()
